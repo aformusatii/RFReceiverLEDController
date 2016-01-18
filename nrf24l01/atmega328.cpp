@@ -23,8 +23,9 @@ void setup_io()
 // Set up SPI interface
 void setup_spi()
 {
-	/* Enable SPI, Master, set clock rate fck/4 */
+	/* Enable SPI, Master, set clock rate fck/2 */
 	SPCR = (1<<SPE)|(1<<MSTR)|(0<<SPR1)|(0<<SPR0);
+	SPSR |= (1<<SPI2X);
 } // setup_spi
 
 /* ======================================================= */

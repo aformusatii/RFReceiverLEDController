@@ -35,45 +35,6 @@ void fixZeroValueOCR();
 RF24 radio;
 const uint64_t pipes[2] = { 0xF0F0F0F0E1LL, 0xF0F0F0F0D2LL };
 
-volatile uint16_t index_intr = 0;
-
-
-volatile uint8_t SET_TCCR0A = 0
-	    |(1<<COM0A1)    // Bits 7:6 – COM0A1:0: Set OC0A on Compare Match
-	    |(1<<COM0A0)    //
-	    |(1<<COM0B1)    // Bits 5:4 – COM0B1:0: Set OC0B on Compare Match
-	    |(1<<COM0B0)
-	    |(0<<WGM01)     // Bits 1:0 – WGM01:0: Normal
-	    |(0<<WGM00)
-	    ;
-
-volatile uint8_t CLEAR_TCCR0A = 0
-	    |(1<<COM0A1)    // Bits 7:6 – COM0A1:0: Clear OC0A on Compare Match
-	    |(0<<COM0A0)    //
-	    |(1<<COM0B1)    // Bits 5:4 – COM0B1:0: Clear OC0B on Compare Match
-	    |(0<<COM0B0)
-	    |(0<<WGM01)     // Bits 1:0 – WGM01:0: Normal
-	    |(0<<WGM00)
-	    ;
-
-volatile uint8_t SET_TCCR2A = 0
-	    |(0<<COM2A1)    // Bits 7:6 – COM2A1:0: Normal port operation, OC2A disconnected.
-	    |(0<<COM2A0)    //
-	    |(1<<COM2B1)    // Bits 5:4 – COM2B1:0: Set OC2B on Compare Match
-	    |(1<<COM2B0)
-	    |(0<<WGM21)     // Bits 1:0 – WGM21:0: Normal
-	    |(0<<WGM20)
-	    ;
-
-volatile uint8_t CLEAR_TCCR2A = 0
-		|(0<<COM2A1)    // Bits 7:6 – COM2A1:0: Normal port operation, OC2A disconnected.
-		|(0<<COM2A0)    //
-	    |(1<<COM2B1)    // Bits 5:4 – COM2B1:0: Clear OC2B on Compare Match
-	    |(0<<COM2B0)
-	    |(0<<WGM21)     // Bits 1:0 – WGM21:0: Normal
-	    |(0<<WGM20)
-	    ;
-
 /********************************************************************************
 	Interrupt Service
 ********************************************************************************/
@@ -89,14 +50,10 @@ ISR(TIMER1_OVF_vect)
 
 ISR(INT0_vect)
 {
-
-	printf("\n int[%d]", index_intr++);
-
     bool tx_ok, tx_fail, rx_ok;
     radio.whatHappened(tx_ok, tx_fail, rx_ok);
 
     if (rx_ok) {
-
         uint8_t data[50];
         uint8_t len = radio.getDynamicPayloadSize();
         radio.read(data, len);
@@ -109,32 +66,6 @@ ISR(INT0_vect)
 
         radio.flush_rx();
     }
-}
-
-ISR(TIMER0_OVF_vect)
-{
-
-	TCCR0A = SET_TCCR0A;
-
-	TCNT0 = 0;
-
-	_delay_us(2);
-
-	TCCR0B |= (1<<FOC0A)|(1<<FOC0B); // Force Output Compare
-
-	TCCR0A = CLEAR_TCCR0A;
-}
-
-ISR(TIMER2_OVF_vect)
-{
-
-	TCCR2A = SET_TCCR2A;
-
-	TCNT2 = 0;
-
-	TCCR2B |= (1<<FOC2A)|(1<<FOC2B); // Force Output Compare
-
-	TCCR2A = CLEAR_TCCR2A;
 }
 
 /********************************************************************************
@@ -156,7 +87,17 @@ int main(void) {
     // Init Timer 0 & 2
     initTimers();
 
+	OCR0A = 255;
+	OCR0B = 255;
+	OCR2A = 255;
+	OCR2B = 255;
+
     _delay_ms(1000);
+
+	OCR0A = 0;
+	OCR0B = 0;
+	OCR2A = 0;
+	OCR2B = 0;
 
     fixZeroValueOCR();
 
@@ -193,8 +134,10 @@ void initGPIO() {
     _in(DDD2, DDRD); // INT0 input
 
     // GPIO Interrupt INT0
-    EICRA = (0<<ISC11)|(0<<ISC10)|(1<<ISC01)|(0<<ISC00); // The falling edge of INT0 generates an interrupt request.
-    EIMSK = (0<<INT1)|(1<<INT0); // Enable INT0
+    // The falling edge of INT0 generates an interrupt request.
+    EICRA = (0<<ISC11)|(0<<ISC10)|(1<<ISC01)|(0<<ISC00);
+    // Enable INT0
+    EIMSK = (1<<INT0);
 
 	_out(DDD3, DDRD); // OC2B
 	_out(DDD5, DDRD); // OC0B
@@ -227,87 +170,40 @@ void handle_usart_cmd(char *cmd, char *args) {
 }
 
 void initTimers() {
-	OCR0A = 0;
-	OCR0B = 0;
-
-	// Reset all timers
-	TCNT0 = 0;
-
 	// Setup Timer/Counter0
-	TCCR0A = 0
-		|(1<<COM0A1)    // Bits 7:6 – COM0A1:0: Clear OC0A on Compare Match
-		|(0<<COM0A0)    //
-		|(1<<COM0B1)    // Bits 5:4 – COM0B1:0: Clear OC0B on Compare Match
-		|(0<<COM0B0)
-	    |(0<<WGM01)     // Bits 1:0 – WGM01:0: Normal
-	    |(0<<WGM00)
-	    ;
-
-	TCCR0B = 0
-	    |(0<<FOC0A)     // Force Output Compare A
-	    |(0<<FOC0B)     // Force Output Compare B
-	    |(0<<WGM02)     // Bit 3 – WGM02: Waveform Generation Mode
-	    |(0<<CS02)      // Bits 2:0 – CS02:0: Clock Select
-	    |(1<<CS01)
-	    |(1<<CS00)      // clkT2S/64 (From prescaler)
-	    ;
-
-	_on(TOIE0, TIMSK0);
-
-	_delay_ms(10);
-
-	OCR2A = 0;
-	OCR2B = 0;
-
-	TCNT2 = 0;
+	// Mode 3 - Fast PWM
+	// Clear OC0A on Compare Match, set OC0A at BOTTOM (non-inverting mode).
+	TCCR0A = (1<<COM0A1) | (0<<COM0A0) | (1<<COM0B1) | (0<<COM0B0) | (1<<WGM01) | (1<<WGM00);
+	// clkI/O/64 (From prescaler)
+	TCCR0B = (0<<WGM02) | (0<<CS02) | (1<<CS01) | (1<<CS00);
 
 	// Setup Timer/Counter2
-	TCCR2A = 0
-	    |(0<<COM2A1)    // Bits 7:6 – COM2A1:0: Normal port operation, OC2A disconnected.
-	    |(0<<COM2A0)    //
-	    |(1<<COM2B1)    // Bits 5:4 – COM2B1:0: Clear OC2B on Compare Match
-	    |(0<<COM2B0)
-	    |(0<<WGM21)     // Bits 1:0 – WGM21:0: Normal
-	    |(0<<WGM20)
-	    ;
-
-	TCCR2B = 0
-	    |(0<<FOC2A)     // Force Output Compare A
-	    |(0<<FOC2B)     // Force Output Compare B
-	    |(0<<WGM22)     // Bit 3 – WGM22: Normal
-	    |(1<<CS22)      // Bits 2:0 – CS22:0: Clock Select
-	    |(0<<CS21)
-	    |(0<<CS20)      // clkT2S/64 (From prescaler)
-	    ;
-
-	_on(TOIE2, TIMSK2);
+	// Mode 3 - Fast PWM
+	// Clear OC2B on Compare Match, set OC2B at BOTTOM (non-inverting mode)
+	TCCR2A = (1<<COM2B1) | (0<<COM2B0) | (1<<WGM21) | (1<<WGM20);
+	// clkT2S/64 (From prescaler)
+	TCCR2B = (0<<WGM22) | (1<<CS22) | (0<<CS21) | (0<<CS20);
 }
 
 void fixZeroValueOCR() {
 	if (OCR0A == 0) {
-		SET_TCCR0A &= ~( _BV(COM0A1) | _BV(COM0A0) );
-		CLEAR_TCCR0A &= ~( _BV(COM0A1) | _BV(COM0A0) );
+		TCCR0A &= ~( _BV(COM0A1) | _BV(COM0A0) );
 		_off(PD6, PORTD);
 	} else {
-		SET_TCCR0A |= (1<<COM0A1) | (1<<COM0A0);
-		CLEAR_TCCR0A |= (1<<COM0A1) | (0<<COM0A0);
+		TCCR0A |= (1<<COM0A1) | (0<<COM0A0);
 	}
 
 	if (OCR0B == 0) {
-		SET_TCCR0A &= ~( _BV(COM0B1) | _BV(COM0B0) );
-		CLEAR_TCCR0A &= ~( _BV(COM0B1) | _BV(COM0B0) );
+		TCCR0A &= ~( _BV(COM0B1) | _BV(COM0B0) );
 		_off(PD5, PORTD);
 	} else {
-		SET_TCCR0A |= (1<<COM0B1) | (1<<COM0B0);
-		CLEAR_TCCR0A |= (1<<COM0B1) | (0<<COM0B0);
+		TCCR0A |= (1<<COM0B1) | (0<<COM0B0);
 	}
 
 	if (OCR2B == 0) {
-		SET_TCCR2A &= ~( _BV(COM2B1) | _BV(COM2B0) );
-		CLEAR_TCCR2A &= ~( _BV(COM2B1) | _BV(COM2B0) );
+		TCCR2A &= ~( _BV(COM2B1) | _BV(COM2B0) );
 		_off(PD3, PORTD);
 	} else {
-		SET_TCCR2A |= (1<<COM2B1) | (1<<COM2B0);
-		CLEAR_TCCR2A |= (1<<COM2B1) | (0<<COM2B0);
+		TCCR2A |= (1<<COM2B1) | (0<<COM2B0);
 	}
 }
